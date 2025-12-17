@@ -12,5 +12,5 @@ This directory contains scripts and analysis notebook for pre-processing (includ
 # [2.analysis](2.analysis/)
 This directory contains scripts and analysis notebook for re-producing figures in our manuscript.
 
-# 3.protocol
+# [3.protocol](3.protocol/)
 The protocol will be available once our work is published online.
