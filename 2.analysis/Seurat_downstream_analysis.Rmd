@@ -1,0 +1,339 @@
+---
+title: "Seurat downstream analysis"
+output:
+  html_document:
+    self_contained: true
+---
+
+# 1. HiC seurat downstream analysis
+
+```{r}
+source("/media/maoni/data/CZP/test_data/ColorPalettes.R")
+source("/media/maoni/data/CZP/test_data/R_functions.R")
+```
+
+```{r}
+set.seed(123)
+work_path <- "/media/maoni/data/CZP/spatial_hic/E1305-hic-24"
+sample <- "E1305-hic-24"
+higashi_out <- "8_higashi_out_higashi_500kb"
+work_path_seurat <- "9_seurat"
+embed_type <- "scAB_scale"
+
+setwd(work_path)
+dir.create(work_path_seurat)
+setwd(paste0(work_path, "/", work_path_seurat))
+dir.create(embed_type)
+setwd(paste0(work_path,  "/", work_path_seurat, "/", embed_type))
+dir.create("Img")
+dir.create("Matrix")
+dir.create("Out")
+dir.create("Plot")
+file.copy(from=paste0(work_path, "/5_bedpe/stat_clean.csv"), 
+          to=paste0(work_path,  "/", work_path_seurat, "/", embed_type, "/Matrix/"), overwrite = TRUE, recursive = FALSE, copy.mode = TRUE)
+file.copy(from=paste0(work_path, "/6_crop/stat_cropped.csv"), 
+          to=paste0(work_path,  "/", work_path_seurat, "/", embed_type, "/Matrix/"), overwrite = TRUE, recursive = FALSE, copy.mode = TRUE)
+file.copy(from=paste0(work_path, "/", higashi_out, "/", sample, "_", embed_type, ".csv"), 
+          to=paste0(work_path,  "/", work_path_seurat, "/", embed_type, "/Matrix/"), overwrite = TRUE, recursive = FALSE, copy.mode = TRUE)
+
+# 1 Load data
+setwd(paste0(work_path, "/", work_path_seurat, "/", embed_type))
+stat_cropped <- read.table("Matrix/stat_cropped.csv", sep =",", header = TRUE, dec =".", stringsAsFactors = F)
+iA_iB <- paste(51-stat_cropped$iA, stat_cropped$iB, sep="x")
+ssAB_matrix <- read.table(paste0("Matrix/", sample, "_scAB_scale.csv"), sep =",", header = F, dec =".", stringsAsFactors = F)
+rownames(ssAB_matrix) <- iA_iB
+ssAB_matrix <- as.matrix(ssAB_matrix)
+dim(ssAB_matrix)
+
+bin_spatial <- read.table(paste0(work_path ,"/", higashi_out, "/", sample, "_scAB_bin.csv"), sep =",", header = FALSE, dec =".", stringsAsFactors = F)
+bin_spatial[,1] <-  gsub("b","",bin_spatial$V1)
+bin_spatial_merge <- paste(bin_spatial$V1, paste(bin_spatial$V3, bin_spatial$V2, sep="-"), sep=":")
+colnames(ssAB_matrix) <- bin_spatial_merge
+dim(ssAB_matrix)
+
+# 2 create seurat object
+assay = "Spatial"
+slice = sample
+image.dir = "/media/maoni/data/CZP/spatial_hic/seurat/core/50*50_blank_img"
+image.nam = paste0(sample, "_fix.png")
+coord.nam = "combine_barcode.round2round1_index1_index2.Seurat.txt"
+Seurat_HiC = CreateSeuratObject(counts = t(ssAB_matrix), project = sample, assay = assay)
+image <- readPNG(source = file.path(image.dir, image.nam))[,,1:3]
+scale.factors <- c("tissue_hires_scalef"=1, "fiducial_diameter_fullres"=1, "tissue_lowres_scalef"=1)
+tissue.positions <- read.table(file = file.path(image.dir,coord.nam), col.names = c("barcodes", "tissue", "row", "col", "imagerow", "imagecol"), header = FALSE, as.is = TRUE, row.names = 1)
+spot.radius <- 0.015
+image <- new(Class = "VisiumV1", image = image, scale.factors = scalefactors(spot = scale.factors[1], fiducial = scale.factors[2], hires = scale.factors[1], lowres = scale.factors[3]), coordinates = tissue.positions, spot.radius = spot.radius)
+image <- image[Cells(Seurat_HiC)]
+DefaultAssay(object = image) <- assay
+Seurat_HiC[[slice]] <- image
+```
+
+```{r fig.width=8, fig.height=4}
+# 3 Data quality
+Seurat_HiC$valid_contact <- log10(stat_cropped$valid_contact)
+Seurat_HiC$cis_more_10kb <- log10(stat_cropped$cis_more_10kb)
+plot1 <- SpatialFeaturePlot(Seurat_HiC, features = "valid_contact",crop = F, pt.size.factor = 1.6, stroke = NA, min.cutoff = "q3") + theme(aspect.ratio = 1)
+plot1$layers[[1]]$aes_params=c(plot1$layers[[1]]$aes_params, shape=22)
+plot2 <- SpatialFeaturePlot(Seurat_HiC, features = "cis_more_10kb",crop = F, pt.size.factor = 1.6, stroke = NA, min.cutoff = "q3") + theme(aspect.ratio = 1) 
+plot2$layers[[1]]$aes_params=c(plot2$layers[[1]]$aes_params, shape=22)
+plot_grid(plot1, plot2)
+```
+```{r}
+# 4 Run PCA
+Seurat_HiC <- SCTransform(Seurat_HiC, assay = "Spatial", verbose = T, variable.features.n = 2000)
+Seurat_HiC <- RunPCA(Seurat_HiC, assay = "SCT", verbose = FALSE)
+# Select PC and res
+PC=36
+res=1
+Seurat_HiC <- FindNeighbors(Seurat_HiC, reduction = "pca", dims = 1:PC)
+Seurat_HiC <- FindClusters(Seurat_HiC, verbose = FALSE, resolution = res)
+Seurat_HiC <- RunUMAP(Seurat_HiC, reduction = "pca", dims = 1:PC)
+```
+
+```{r fig.width=12, fig.height=6}
+umap_Spa <- list()
+umap_Spa[["p1"]] <- DimPlot(Seurat_HiC, reduction = "umap", label = TRUE)
+umap_Spa[["p2"]] <- SpatialDimPlot(Seurat_HiC, label = TRUE, label.size = 3, pt.size.factor = 1.6, stroke = NA)
+umap_Spa[["p2"]]$layers[[1]]$aes_params=c(umap_Spa[["p2"]]$layers[[1]]$aes_params, shape=22)
+p <- ggarrange(plotlist = umap_Spa, ncol = 2, nrow = ceiling(length(umap_Spa)/2))
+print(p)
+```
+```{r fig.width=12, fig.height=6}
+anno <- rep(NA,ncol(Seurat_HiC))
+anno[Seurat_HiC$seurat_clusters %in% c(0)] <- "H1"
+anno[Seurat_HiC$seurat_clusters %in% c(1)] <- "H2"
+anno[Seurat_HiC$seurat_clusters %in% c(2)] <- "H3"
+anno[Seurat_HiC$seurat_clusters %in% c(3)] <- "H4"
+anno[Seurat_HiC$seurat_clusters %in% c(4)] <- "H5"
+anno[Seurat_HiC$seurat_clusters %in% c(5)] <- "H6"
+anno[Seurat_HiC$seurat_clusters %in% c(6)] <- "H7"
+anno[Seurat_HiC$seurat_clusters %in% c(7)] <- "H8"
+anno[Seurat_HiC$seurat_clusters %in% c(8)] <- "H9"
+Seurat_HiC$cell_type <- factor(anno,levels = paste0("H", 1:9))
+
+my_color_palette <- brewer.pal(9, "Set1")
+names(my_color_palette) <- levels(Seurat_HiC$cell_type)
+
+umap_Spa <- list()
+umap_Spa[["p1"]] <- DimPlot(Seurat_HiC, reduction = "umap", group.by = "cell_type", label = FALSE, pt.size = 0.5, cols = my_color_palette) + theme(aspect.ratio = 1)
+umap_Spa[["p2"]] <- SpatialDimPlot(Seurat_HiC, group.by = "cell_type", label = FALSE, label.size = 3, pt.size.factor = 1.6, stroke = NA, cols = my_color_palette) + theme(aspect.ratio = 1)
+umap_Spa[["p2"]]$layers[[1]]$aes_params=c(umap_Spa[["p2"]]$layers[[1]]$aes_params, shape=22)
+
+p <- ggarrange(plotlist = umap_Spa, ncol = 2, nrow = ceiling(length(umap_Spa)/2))
+print(p)
+
+```
+
+
+# 2. RNA seurat downstream analysis
+
+```{r}
+set.seed(123)
+work_path <- "/media/maoni/data/CZP/spatial_transcriptome/E13-23-RNA"
+sample <- "E13-23-RNA"
+setwd(work_path)
+dir.create("6_seurat")
+setwd(paste0(work_path, "/6_seurat"))
+dir.create("Img")
+dir.create("Matrix")
+dir.create("Out")
+dir.create("Plot")
+file.copy(from=paste0(work_path, "/3_umi_tools/", sample, ".debarcoded_passed_reads_stat.csv"), 
+          to=paste0(work_path, "/6_seurat/Matrix/"), overwrite = TRUE, recursive = FALSE, copy.mode = TRUE)
+file.copy(from=paste0(work_path, "/4_zUMIs/", sample, ".debarcoded_passed_reads_stat_cropped.csv"), 
+          to=paste0(work_path, "/6_seurat/Matrix/"), overwrite = TRUE, recursive = FALSE, copy.mode = TRUE)
+file.copy(from=paste0(work_path, "/4_zUMIs/", sample, ".dgecounts.rds"), 
+          to=paste0(work_path, "/6_seurat/Matrix/"), overwrite = TRUE, recursive = FALSE, copy.mode = TRUE)
+
+# prepare gene infor file
+# perl -lane 'if(/gene_id\s.(.+?).\;.+?gene_name\s.(.+?).\;.+?gene_biotype\s.(.+?).\;/){print "$1\t$2\t$3"}' Mus_musculus.GRCm38.102.chr.gtf | sort -u > gGRCm38.102.gene.ids.names
+gene.names <- read.table("/media/maoni/data/Reference/mouse/GRCm38_mm10/ensembl/gGRCm38.102.gene.ids.names", sep = "\t")
+
+# remove unnecessary pseudogene, rRNA, snoRNA, tRNA, ribozyme
+removed.genes1 <- gene.names$V2[grep("pseudogene|tRNA|rRNA|snoRNA|ribozyme|snRNA|scaRNA|misc_RNA|scRNA|sRNA", gene.names$V3)]
+removed.genes2 <- gene.names$V2[grep("mt-|Rps|Rpl|Hba|Hbb", gene.names$V2)]  # 1829
+removed.genes <- unique(c(removed.genes1, removed.genes2))  # 38300
+
+allCounts <- readRDS(paste0("Matrix/", sample, ".dgecounts.rds"))
+count_matrix <- allCounts$umicount$inex$all
+count_matrix <- as.matrix(count_matrix)
+
+raw_stat = read.table(paste0("Matrix/", sample, ".debarcoded_passed_reads_stat.csv"),sep =",", header = TRUE, dec =".", stringsAsFactors = F)
+raw_stat_cell = paste(51-raw_stat$iA, raw_stat$iB, sep="x")
+raw_stat_barcode = paste0(raw_stat$bc_B, raw_stat$bc_A)
+colnames(count_matrix) <- raw_stat_cell[match(colnames(count_matrix),raw_stat_barcode)]
+rownames(count_matrix) <- gene.names$V2[match(rownames(count_matrix), gene.names[,1])]
+
+ID <- as.character(rownames(count_matrix))
+d <- duplicated(ID)
+ID <- factor(ID, levels = unique(ID))
+count_matrix <- rowsum(as.matrix(count_matrix), ID, reorder = FALSE, na.rm = TRUE)
+removed.gene <- intersect(rownames(count_matrix), removed.genes)
+count_matrix <- count_matrix[-match(removed.gene, rownames(count_matrix)),]
+dim(count_matrix)
+
+# 1 prepare cropped matrix
+stat_cropped = read.table(paste0("Matrix/", sample, ".debarcoded_passed_reads_stat_cropped.csv"),sep =",", header = TRUE, dec =".", stringsAsFactors = F)
+iA_iB <- paste(51-stat_cropped$iA, stat_cropped$iB, sep="x")
+count_matrix_cropped <- count_matrix[, match(iA_iB,colnames(count_matrix))]
+dim(count_matrix_cropped)
+
+# 2 create seurat object
+assay = "Spatial"
+slice = sample
+image.dir = "/media/maoni/data/CZP/spatial_transcriptome/seurat/core/50*50_blank_img" # "./Img"
+image.nam = paste0(sample,"_fix_1080.png") # "grey_pixel_1080p.png"
+coord.nam = "combine_barcode.round2round1_index1_index2.Seurat.txt"
+Seurat_RNA = CreateSeuratObject(counts = count_matrix_cropped, project = sample,assay = assay, min.cells = 3, min.features = 0) # min.cells min.features
+image <- readPNG(source = file.path(image.dir, image.nam))[,,1:3]
+scale.factors <- c("tissue_hires_scalef"=1, "fiducial_diameter_fullres"=1, "tissue_lowres_scalef"=1)
+tissue.positions <- read.table(file = file.path(image.dir,coord.nam), col.names = c("barcodes", "tissue", "row", "col", "imagerow", "imagecol"), header = FALSE, as.is = TRUE, row.names = 1)
+spot.radius <- 0.015 # estiamte:(0.13)*50/410/2
+image <- new(Class = "VisiumV1", image = image, scale.factors = scalefactors(spot = scale.factors[1], fiducial = scale.factors[2], hires = scale.factors[1], lowres = scale.factors[3]), coordinates = tissue.positions, spot.radius = spot.radius)
+image <- image[Cells(Seurat_RNA)]
+DefaultAssay(object = image) <- assay
+Seurat_RNA[[slice]] <- image
+```
+
+```{r fig.width=8, fig.height=4}
+# 3 Data quality
+plot1 <- VlnPlot(Seurat_RNA, features = c("nCount_Spatial", "nFeature_Spatial"), ncol = 3, pt.size = 0)
+plot1
+```
+```{r fig.width=8, fig.height=4}
+plot2 <- FeatureScatter(Seurat_RNA, feature1 = "nCount_Spatial", feature2 = "nFeature_Spatial")
+plot2
+```
+
+```{r fig.width=8, fig.height=4}
+plot3 <- SpatialFeaturePlot(Seurat_RNA, features = "nCount_Spatial", pt.size.factor = 1.6, stroke = NA) + theme(legend.position = "top")
+plot3$layers[[1]]$aes_params=c(plot3$layers[[1]]$aes_params, shape=22)
+plot4 <- SpatialFeaturePlot(Seurat_RNA, features = "nFeature_Spatial", pt.size.factor = 1.6, stroke = NA) + theme(legend.position = "top")
+plot4$layers[[1]]$aes_params=c(plot4$layers[[1]]$aes_params, shape=22)
+plot3 + plot4
+```
+
+```{r}
+# 4 Run PCA
+Seurat_RNA <- SCTransform(Seurat_RNA, assay = "Spatial", verbose = FALSE)
+Seurat_RNA <- RunPCA(Seurat_RNA, assay = "SCT", verbose = FALSE)
+# Select PC and res
+PC=30
+res=0.8
+Seurat_RNA <- FindNeighbors(Seurat_RNA, reduction = "pca", dims = 1:PC)
+Seurat_RNA <- FindClusters(Seurat_RNA, verbose = FALSE, resolution = res)
+Seurat_RNA <- RunUMAP(Seurat_RNA, reduction = "pca", dims = 1:PC)
+```
+
+```{r fig.width=12, fig.height=6}
+umap_Spa <- list()
+umap_Spa[["p1"]] <- DimPlot(Seurat_RNA, reduction = "umap", label = TRUE)
+umap_Spa[["p2"]] <- SpatialDimPlot(Seurat_RNA, label = FALSE, label.size = 3, pt.size.factor = 1.6, stroke = NA)
+umap_Spa[["p2"]]$layers[[1]]$aes_params=c(umap_Spa[["p2"]]$layers[[1]]$aes_params, shape=22)
+p <- ggarrange(plotlist = umap_Spa, ncol = 2, nrow = ceiling(length(umap_Spa)/2))
+print(p)
+```
+```{r fig.width=12, fig.height=6}
+# 5 Aannotation
+anno <- rep(NA,ncol(Seurat_RNA))
+anno[Seurat_RNA$seurat_clusters %in% c(0)] <- "R3"
+anno[Seurat_RNA$seurat_clusters %in% c(1)] <- "R9"
+anno[Seurat_RNA$seurat_clusters %in% c(2)] <- "R2"
+anno[Seurat_RNA$seurat_clusters %in% c(3)] <- "R10"
+anno[Seurat_RNA$seurat_clusters %in% c(4)] <- "R8"
+anno[Seurat_RNA$seurat_clusters %in% c(5,15)] <- "R11"
+anno[Seurat_RNA$seurat_clusters %in% c(6,14)] <- "R12"
+anno[Seurat_RNA$seurat_clusters %in% c(7,10)] <- "R13"
+anno[Seurat_RNA$seurat_clusters %in% c(8)] <- "R7"
+anno[Seurat_RNA$seurat_clusters %in% c(9)] <- "R5"
+anno[Seurat_RNA$seurat_clusters %in% c(11)] <- "R14"
+anno[Seurat_RNA$seurat_clusters %in% c(12)] <- "R16"
+anno[Seurat_RNA$seurat_clusters %in% c(13)] <- "R4"
+anno[Seurat_RNA$seurat_clusters %in% c(16)] <- "R1"
+anno[Seurat_RNA$seurat_clusters %in% c(17)] <- "R6"
+anno[Seurat_RNA$seurat_clusters %in% c(18)] <- "R15"
+
+Seurat_RNA$cell_type <- factor(anno,levels = paste0("R", 1:16))
+
+# set colors for each cluster
+my_color_palette <- ArchRPalettes$bear
+names(my_color_palette) <- paste0("R", 1:16)
+
+umap_Spa <- list()
+umap_Spa[["p1"]] <- DimPlot(Seurat_RNA, reduction = "umap", group.by = "cell_type", label = FALSE, pt.size = 0.5, cols = my_color_palette) + theme(aspect.ratio = 1)
+umap_Spa[["p2"]] <- SpatialDimPlot(Seurat_RNA, group.by = "cell_type", label = FALSE, label.size = 3, pt.size.factor = 1.6, stroke = NA, cols = my_color_palette) + theme(aspect.ratio = 1)
+umap_Spa[["p2"]]$layers[[1]]$aes_params=c(umap_Spa[["p2"]]$layers[[1]]$aes_params, shape=22)
+
+p <- ggarrange(plotlist = umap_Spa, ncol = 2, nrow = ceiling(length(umap_Spa)/2))
+print(p)
+
+```
+```{r}
+# 6 DE
+Idents(Seurat_RNA) <- "cell_type"
+de_markers <- FindAllMarkers(Seurat_RNA, only.pos = T, min.pct = 0.1, logfc.threshold = 0.25)  #8434
+top50 <- de_markers %>% group_by(cluster) %>% top_n(n = 50, wt = avg_log2FC)  %>% arrange(cluster, desc(avg_log2FC))
+head(de_markers)
+```
+
+# 3. Integrated HiC and RNA
+
+```{r fig.width=8, fig.height=4}
+gene_infor_500k <- read.csv("/media/maoni/data/Reference/mouse/GRCm38_mm10/ensembl/GRCm38_100_gtf_infor_hic_500kb_reference")
+head(gene_infor_500k)
+
+options(scipen = 0)
+Idents(Seurat_RNA) <- "cell_type"
+Idents(Seurat_HiC) <- "cell_type"
+dim(Seurat_RNA)
+dim(Seurat_HiC)
+
+marker_genes <- list()
+count = 1
+for(i in unique(de_markers$cluster)){
+  marker_genes[[count]] <- de_markers$gene[which(de_markers$cluster == i)][1:50]
+  count = count + 1
+}
+names(marker_genes) <- unique(de_markers$cluster)
+
+DefaultAssay(Seurat_HiC) <- "Spatial"
+for(i in names(marker_genes)){
+  marker_genes[[i]] <- intersect(rownames(Seurat_HiC), unique(gene_infor_500k$gene_region[which(gene_infor_500k$gene_name %in% marker_genes[[i]])]))
+  Seurat_HiC@meta.data[,i] <- colMeans(as.matrix(GetAssayData(Seurat_HiC, assay = "Spatial", slot = "data")[marker_genes[[i]],]))
+}
+
+scale_rows_0_1 <- function(df) {
+  t(apply(df, 1, function(x) {
+    (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+  })) %>% as.data.frame()
+}
+
+tmp_meta <- as.matrix(Seurat_HiC@meta.data[,levels(Seurat_RNA)])
+rownames(tmp_meta) <- paste0(Seurat_HiC$cell_type)
+tmp_meta <- limma::avereps(tmp_meta)
+tmp_meta0 <- apply(tmp_meta, 2, function(x){scale(x)})
+
+tmp_meta0 <- scale_rows_0_1(tmp_meta0)
+rownames(tmp_meta0) <- rownames(tmp_meta)
+tmp_meta0 <- tmp_meta0[levels(Seurat_HiC$cell_type),]
+
+tmp_meta0
+
+mat <- as.matrix(tmp_meta0)
+pc <- prcomp(mat, scale. = TRUE)
+row_order <- order(pc$x[, 1])
+col_order <- order(pc$rotation[, 1])
+
+whitePurple = c("9"='#f7fcfd',"6"='#e0ecf4',"8"='#bfd3e6',"5"='#9ebcda',"2"='#8c96c6',"4"='#8c6bb1',"7"='#88419d',"3"='#810f7c',"1"='#4d004b')
+p <- pheatmap::pheatmap(
+  mat[row_order, col_order],
+  cellwidth = 20,
+  cellheight = 20,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  color = colorRampPalette(whitePurple)(100),
+  filename = NA
+)
+
+```
+
