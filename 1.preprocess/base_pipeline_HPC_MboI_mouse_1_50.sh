@@ -39,7 +39,7 @@ if [ -d $work_path ] && [ ! -z $sample ]; then
 	$fastqc -t $ppn ${data_path}/${sample}_R1.fq.gz ${data_path}/${sample}_R2.fq.gz -o $work_path/fastqc
 	
 	
-          ### 0.check linker (QC step1) ###
+    ### 0.check linker (QC step1) ###
 	mkdir $check_linker_path
 	echo "Starting to process Hi-C data:" >> ${check_linker_path}/check_linker.log
 	echo "Raw reads in total:" >> ${check_linker_path}/check_linker.log
@@ -50,9 +50,8 @@ if [ -d $work_path ] && [ ! -z $sample ]; then
 	echo "Multiple barcode2:" >> ${check_linker_path}/check_linker.log
 	zcat ${data_path}/${sample}_R1.fq.gz | grep "GTGGCCGATGTTTCG[ATCG]\{22,24\}GTGGCCGATGTTTCG" | wc -l >> ${check_linker_path}/check_linker.log
 	echo "ME barcode1 mix:" >> ${check_linker_path}/check_linker.log
-          zcat ${data_path}/${sample}_R1.fq.gz | grep "CATCGGCGTACGACT[ATCG]\{27,29\}CATCGGCGTACGACT" | wc -l >> ${check_linker_path}/check_linker.log
-        
-          zcat ${data_path}/${sample}_R1.fq.gz | awk '{if (NR%4==2){print $0}}' - | grep "CATCGGCGTACGACT[ATCG]\{22,24\}CATCGGCGTACGACT" > ${check_linker_path}/1_2ormore_barcodeA.txt
+    zcat ${data_path}/${sample}_R1.fq.gz | grep "CATCGGCGTACGACT[ATCG]\{27,29\}CATCGGCGTACGACT" | wc -l >> ${check_linker_path}/check_linker.log
+    zcat ${data_path}/${sample}_R1.fq.gz | awk '{if (NR%4==2){print $0}}' - | grep "CATCGGCGTACGACT[ATCG]\{22,24\}CATCGGCGTACGACT" > ${check_linker_path}/1_2ormore_barcodeA.txt
           
           
 	### 1.trimmomatic ###
@@ -60,11 +59,11 @@ if [ -d $work_path ] && [ ! -z $sample ]; then
 	$cutadapt -j 6 \
     	         -a 'CTGTCTCTTATACACATCT' \
     	         -m 37 \
-	         --trim-n \
+	             --trim-n \
     	         --pair-filter=first \
     	         -o ${trimmed_path}/${sample}.cutadapt.R2.fq.gz \
-	         -p ${trimmed_path}/${sample}.cutadapt.R1.fq.gz \
-	          ${data_path}/${sample}_R2.fq.gz ${data_path}/${sample}_R1.fq.gz
+	             -p ${trimmed_path}/${sample}.cutadapt.R1.fq.gz \
+	             ${data_path}/${sample}_R2.fq.gz ${data_path}/${sample}_R1.fq.gz
 	
 	### fastqc ###
 	$fastqc -t $ppn ${trimmed_path}/${sample}.cutadapt.R1.fq.gz ${trimmed_path}/${sample}.cutadapt.R2.fq.gz -o $work_path/fastqc
@@ -83,19 +82,19 @@ if [ -d $work_path ] && [ ! -z $sample ]; then
 	--read2-in=${trimmed_path}/${sample}.cutadapt.R2.fq.gz --read2-out=${debarcode_path}/${sample}.extract.R2.fq.gz \
 	-L ${debarcode_path}/extract.log
           
-      	### fastqc ###
+    ### fastqc ###
 	$fastqc -t $ppn ${debarcode_path}/${sample}.extract.R1.fq.gz ${debarcode_path}/${sample}.extract.R2.fq.gz -o $work_path/fastqc
           
 	### 3. extract barcode to a txt ###
 	zcat ${debarcode_path}/${sample}.extract.R1.fq.gz | awk 'NR%4==1{print $0}' | sed 's/^.*_\([A-Z]\{8\}\)_\([A-Z]\{8\}\) .*$/\1_\2/g' - > ${debarcode_path}/barcodeB_A.read1.txt
              
-          mkdir $barcode_ref
-          $r_exec $script_path/barcode_file_pre.R \
+    mkdir $barcode_ref
+    $r_exec $script_path/barcode_file_pre.R \
 	-p $barcode_ref \
 	-a $barcode_ref/barcodes_A.txt \
 	-b $barcode_ref/barcodes_B.txt
 	
-          $r_exec $script_path/9_check_barcode.R \
+    $r_exec $script_path/9_check_barcode.R \
 	-p $check_linker_path \
 	-n $debarcode_path/barcodeB_A.read1.txt \
 	-b $barcode_ref/2_combine_barcode.round2round1_index1_index2.txt
@@ -161,8 +160,8 @@ if [ -d $work_path ] && [ ! -z $sample ]; then
 	--output=$bedpe_path/data_all_pixel.txt \
 	--stat=$bedpe_path/stat_clean.csv
 			 
-          ### 7. stat_clean ###
-          $r_exec $script_path/stat_clean.R \
+    ### 7. stat_clean ###
+    $r_exec $script_path/stat_clean.R \
 	-f $bedpe_path/stat_clean.csv \
 	-p $work_path 
 
