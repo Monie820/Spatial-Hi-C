@@ -12,5 +12,5 @@ This directory contains scripts and analysis notebook for pre-processing (includ
 ## [2.analysis](2.analysis/)
 This directory contains scripts and analysis notebook for re-producing figures in our manuscript.
 
-## 03.protocol
+## 3.protocol
 Protocol can be found at [protocol.io](https://www.protocols.io/view/spatial-hi-c-hefsb3bnf?step=3?step=3).
